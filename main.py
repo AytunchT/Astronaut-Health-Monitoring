@@ -1,140 +1,136 @@
 import os
 import streamlit as st
 import pandas as pd
-from datetime import datetime
- 
-file = "File.csv" # creates file.csv
 
-if "missionMessage" in st.session_state:
-    st.success(st.session_state.missionMessage)
-    del st.session_state.missionMessage
+file = "File.csv"            # daily records
+missionFile = "Mission.csv"  # mission info (so F5 doesn't lose it)
 
-if "saveMessage" in st.session_state:
-    st.success(st.session_state.saveMessage)
-    del st.session_state.saveMessage
-
-st.title("Astronaut Health Monitor")
-
-if "missionShow" not in st.session_state:
-    st.session_state.missionShow = True
-
-#gets mission location and mission days and saves it in a dictionary, when saved or created a file, won't show again
-if not os.path.exists(file) and st.session_state.missionShow: 
-    missionLocation = st.selectbox(
-        "Where is the mission?",
-        options=("Moon", "Mars")
-    )
-    missionDays = st.number_input("Mission length (days)", 1, 1000, 30)
-    radiationLimit = st.number_input("Radiation Limit (mSv)", 0, 600, 600)
-    st.session_state.mission = { #use this to create dictionary to save it in every run.
-        "Location": missionLocation, 
-        "Days": missionDays,
-        "Radiation Limit": radiationLimit
-        }
-
-#radiation dictionary
-radiation = { 
+radiation = {
     "Moon": 1.3,
     "Mars": 0.67,
 }
 
-careerLimit = 600
+# one-time message after rerun
+if "missionMessage" in st.session_state:
+    st.success(st.session_state.missionMessage)
+    del st.session_state.missionMessage
 
-#dose calculator
-if "mission" in st.session_state:
-    m = st.session_state.mission
-    dose = radiation[m["Location"]] * m["Days"]
+st.title("Astronaut Health Monitor")
 
-    if dose > m["Radiation Limit"]: # dose > 600
-        st.error("CRITICAL: RADIATION LIMIT REACHED, YOU CAN'T PARTICIPATE IN THIS MISSION")
-    elif dose > m["Radiation Limit"] * 0.5: # dose > 300
-        st.warning("Radiation limit is high, are you certain you want to participate in this mission?")
+# load mission from file if it exists
+if "mission" not in st.session_state and os.path.exists(missionFile):
+    st.session_state.mission = pd.read_csv(missionFile).iloc[0].to_dict()
 
-    remainingRadiationLimit = m["Radiation Limit"] - dose
+# ---------- MISSION SETUP ----------
+if "mission" not in st.session_state:
+    missionLocation = st.selectbox("Where is the mission?", options=("Moon", "Mars"))
+    missionDays = st.number_input("Mission length (days)", 1, 1000, 30)
+    radiationLimit = st.number_input("Radiation Limit (mSv)", 0, 600, 600)
 
-if "mainShow" not in st.session_state:
-    st.session_state.mainShow = False
-
-if st.session_state.missionShow:
     if st.button("Save Mission"):
-        st.session_state.missionShow = False
-        st.session_state.mainShow = True
+        mission = {
+            "Location": missionLocation,
+            "Days": missionDays,
+            "Radiation Limit": radiationLimit,
+        }
+        pd.DataFrame([mission]).to_csv(missionFile, index=False)
+        st.session_state.mission = mission
         st.session_state.missionMessage = "Mission saved!"
         st.rerun()
 
+    st.stop()  # stops here, nothing below runs until the mission is saved
 
+# ---------- RADIATION ----------
+m = st.session_state.mission
+dose = radiation[m["Location"]] * m["Days"]
+remainingRadiationLimit = m["Radiation Limit"] - dose
 
-if os.path.exists(file) or st.session_state.mainShow:
-    sleep = st.number_input("How many hours did you sleep", 0, 24, 7)
-    heartBeat = st.number_input("What is your Heart Beat?", 30, 200, 70)
-    mood = st.slider("Mood (1-10)", 1, 10, 5)
+if dose > m["Radiation Limit"]:
+    st.error("CRITICAL: RADIATION LIMIT REACHED, YOU CAN'T PARTICIPATE IN THIS MISSION")
+elif dose > m["Radiation Limit"] * 0.5:
+    st.warning("Radiation limit is high, are you certain you want to participate in this mission?")
 
-
-if st.button("Save"):
-    st.session_state.missionShow = False
-    # Creates new dictionary table in panda
-    new = pd.DataFrame ([{
-        "Date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "Sleep (hr)": sleep,
-        "Heart Beat (BPM)": heartBeat,
-        "Mood": mood,
-        "Remaining Limit (mSv)": remainingRadiationLimit
-    }])
-
-
-    if os.path.exists(file): #cheks is there a csv file
-        old = pd.read_csv(file) #reads old csv file
-        table = pd.concat([old, new], ignore_index = True) #merge the new file and old file 
-        #igone_index=True deletes the old indexes and creates new indexes.
+# ---------- DAILY INPUT ----------
+# day number continues from the last day in the file
+if "day" not in st.session_state:
+    if os.path.exists(file):
+        st.session_state.day = int(pd.read_csv(file)["Day"].max()) + 1
     else:
-        table = new # if there is no old file, creates a new one
+        st.session_state.day = 1
 
-    table.to_csv(file, index=False) #writes table file in csv
-    #index=False stops to create index in csv file.
-    st.session_state.saveMessage = "Saved!"
-    st.rerun()
+if "saved" not in st.session_state:
+    st.session_state.saved = False  # False = today's inputs are open
 
+st.subheader(f"Day {st.session_state.day}")
+
+if not st.session_state.saved:
+    sleep = st.number_input("How many hours did you sleep", 0, 24, 7)
+    mood = st.slider("Mood (1-10)", 1, 10, 5)
+    workload = st.slider("Workload today (1-10)", 1, 10, 5)
+    bedtime = st.time_input("Bedtime")
+    talk = st.checkbox("Did you talk to someone today?")
+
+    if st.button("Save"):
+        new = pd.DataFrame([{
+            "Day": st.session_state.day,
+            "Sleep (hr)": sleep,
+            "Talked": talk,
+            "Mood": mood,
+            "Workload": workload,
+            "Bedtime": bedtime.strftime("%H:%M"),
+            "Remaining Limit (mSv)": remainingRadiationLimit,
+        }])
+
+        if os.path.exists(file):
+            table = pd.concat([pd.read_csv(file), new], ignore_index=True)
+        else:
+            table = new
+
+        table.to_csv(file, index=False)
+        st.session_state.saved = True
+        st.rerun()
+else:
+    st.success(f"Day {st.session_state.day} saved!")
+    if st.button("Next Day"):
+        st.session_state.day += 1
+        st.session_state.saved = False
+        st.rerun()
+
+# ---------- SAVED FILES ----------
 if "fileShow" not in st.session_state:
-    st.session_state.fileShow = False #table is closed
+    st.session_state.fileShow = False
 
 if os.path.exists(file):
-    #if button is clicked, show the table
     if st.button("Saved Files"):
-        st.session_state.fileShow = not st.session_state.fileShow #open the table
+        st.session_state.fileShow = not st.session_state.fileShow
 
-    #if the table is opened, read the csv file
     if st.session_state.fileShow:
-        st.dataframe(pd.read_csv(file)) #dataframe reads file and shows the table in the screen
+        st.dataframe(pd.read_csv(file))
 
-
+# ---------- TIPS ----------
 if "tipsShow" not in st.session_state:
     st.session_state.tipsShow = False
 
 if os.path.exists(file):
     data = pd.read_csv(file)
-    
+
     if st.button("Tips"):
         st.session_state.tipsShow = not st.session_state.tipsShow
 
     if st.session_state.tipsShow:
-        last = data.iloc[-1] #gets the last input.
         tips = []
         critical = False
 
-        #For normal situations
-        if data["Sleep (hr)"].mean() < 8: #.mean() calculates average // if sleep in file's average is below 8, add "Sleep More"
+        if data["Sleep (hr)"].mean() < 8:
             tips.append("Sleep More")
         if data["Mood"].mean() < 5:
             tips.append("Try to relax and talk to someone")
-        
-        #For deadly situations
-        if last["Heart Beat (BPM)"] < 40 or last["Heart Beat (BPM)"] > 150:
-            st.error("CRITICAL: DEADLY HEART BEAT, SEEK HELP IMMEDIATLY")
+
         if data["Sleep (hr)"].mean() <= 3:
             st.error("CRITICAL: DEADLY SLEEPING SCHEDULE, SLEEP MORE")
             critical = True
-        
-        if tips and not critical: #if tips is not empty and critical = 
+
+        if tips and not critical:
             for tip in tips:
                 st.warning(tip)
         elif not critical:
