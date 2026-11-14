@@ -5,6 +5,14 @@ from datetime import datetime
  
 file = "File.csv" # creates file.csv
 
+if "missionMessage" in st.session_state:
+    st.success(st.session_state.missionMessage)
+    del st.session_state.missionMessage
+
+if "saveMessage" in st.session_state:
+    st.success(st.session_state.saveMessage)
+    del st.session_state.saveMessage
+
 st.title("Astronaut Health Monitor")
 
 if "missionShow" not in st.session_state:
@@ -44,10 +52,23 @@ if "mission" in st.session_state:
 
     remainingRadiationLimit = m["Radiation Limit"] - dose
 
+if "mainShow" not in st.session_state:
+    st.session_state.mainShow = False
 
-sleep = st.number_input("How many hours did you sleep", 0, 24, 7)
-heartBeat = st.number_input("What is your Heart Beat?", 30, 200, 70)
-mood = st.slider("Mood (1-10)", 1, 10, 5)
+if st.session_state.missionShow:
+    if st.button("Save Mission"):
+        st.session_state.missionShow = False
+        st.session_state.mainShow = True
+        st.session_state.missionMessage = "Mission saved!"
+        st.rerun()
+
+
+
+if os.path.exists(file) or st.session_state.mainShow:
+    sleep = st.number_input("How many hours did you sleep", 0, 24, 7)
+    heartBeat = st.number_input("What is your Heart Beat?", 30, 200, 70)
+    mood = st.slider("Mood (1-10)", 1, 10, 5)
+
 
 if st.button("Save"):
     st.session_state.missionShow = False
@@ -70,7 +91,7 @@ if st.button("Save"):
 
     table.to_csv(file, index=False) #writes table file in csv
     #index=False stops to create index in csv file.
-    st.success("Saved")
+    st.session_state.saveMessage = "Saved!"
     st.rerun()
 
 if "fileShow" not in st.session_state:
