@@ -33,14 +33,39 @@ if st.button("Save"):
     #index=False stops to create index in csv file.
     st.success("Saved")
 
-if "show" not in st.session_state:
-    st.session_state.show = False #table is closed
+if "fileShow" not in st.session_state:
+    st.session_state.fileShow = False #table is closed
 
 if os.path.exists(file):
     #if button is clicked, show the table
     if st.button("Saved Files"):
-        st.session_state.show = not st.session_state.show #open the table
+        st.session_state.fileShow = not st.session_state.fileShow #open the table
 
     #if the table is opened, read the csv file
-    if st.session_state.show:
+    if st.session_state.fileShow:
         st.dataframe(pd.read_csv(file)) #dataframe reads file and shows the table in the screen
+
+
+
+if "tipsShow" not in st.session_state:
+    st.session_state.tipsShow = False
+
+if os.path.exists(file):
+    data = pd.read_csv(file)
+    
+    if st.button("Tips"):
+        st.session_state.tipsShow = not st.session_state.tipsShow
+
+    if st.session_state.tipsShow:
+        tips = []
+
+        if data["Sleep"].mean() < 8: #.mean() calculates average // if sleep in file's average is below 8, add "Sleep More"
+            tips.append("Sleep More")
+        if data["Mood"].mean() < 5:
+             tips.append("Try to relax and talk to someone")
+
+        if tips: #if tips is not empty
+            for tip in tips:
+                st.warning(tip)
+        else: # if tips is empty
+            st.success("Everything looks good!")
