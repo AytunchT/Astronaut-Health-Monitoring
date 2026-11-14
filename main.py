@@ -8,8 +8,8 @@ file = "File.csv" # creates file.csv
 st.title("Astronaut Health Monitor")
 
 sleep = st.number_input("How many hours did you sleep", 0, 24, 7)
-heartBeat = st.number_input("What is your pulse?", 30, 200, 70)
-mood = st.slider("Spiritual mood (1-10)", 1, 10, 5)
+heartBeat = st.number_input("What is your Heart Beat?", 30, 200, 70)
+mood = st.slider("Mood (1-10)", 1, 10, 5)
 
 if st.button("Save"):
     st.write(f"Saved as: {sleep} hours of sleep, {heartBeat} pulse, {mood} mood")
@@ -17,7 +17,7 @@ if st.button("Save"):
     new = pd.DataFrame ([{
         "Date": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "Sleep": sleep,
-        "Hearth Beat": heartBeat,
+        "Heart Beat": heartBeat,
         "Mood": mood
     }])
 
@@ -57,15 +57,25 @@ if os.path.exists(file):
         st.session_state.tipsShow = not st.session_state.tipsShow
 
     if st.session_state.tipsShow:
+        last = data.iloc[-1] #gets the last input.
         tips = []
+        critical = False
 
+        #For normal situations
         if data["Sleep"].mean() < 8: #.mean() calculates average // if sleep in file's average is below 8, add "Sleep More"
             tips.append("Sleep More")
         if data["Mood"].mean() < 5:
-             tips.append("Try to relax and talk to someone")
-
-        if tips: #if tips is not empty
+            tips.append("Try to relax and talk to someone")
+        
+        #For deadly situations
+        if last["Heart Beat"] < 40 or last["Heart Beat"] > 150:
+            st.error("CRITICAL: DEADLY HEART BEAT, SEEK HELP IMMEDIATLY")
+        if data["Sleep"].mean() <= 3:
+            st.error("CRITICAL: DEADLY SLEEPING SCHEDULE, SLEEP MORE")
+            critical = True
+        
+        if tips and not critical: #if tips is not empty and critical = 
             for tip in tips:
                 st.warning(tip)
-        else: # if tips is empty
+        elif not critical:
             st.success("Everything looks good!")
