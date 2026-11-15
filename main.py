@@ -10,12 +10,26 @@ radiation = {
     "Mars": 0.67,
 }
 
+muscleOptions = ["Biceps", "Triceps", "Back", "Chest", "Legs", "Shoulders"]
+
+
+# a fresh log for a new day
+def emptyLog():
+    return {
+        "Exercised": False,
+        "Muscle Groups": "",
+        "Calories Burnt": 0,
+        "Calories Consumed": 0,
+    }
+
+
 # adds one row to the end of a csv file (creates the file if it doesn't exist)
 def appendRow(path, row):
     new = pd.DataFrame([row])
     if os.path.exists(path):
         new = pd.concat([pd.read_csv(path), new], ignore_index=True)
     new.to_csv(path, index=False)
+
 
 # one-time message after rerun
 if "message" in st.session_state:
@@ -82,9 +96,13 @@ if "phase" not in st.session_state:
 if "tool" not in st.session_state:
     st.session_state.tool = None
 
+# exercise / calories collected during the day, saved with the daily record
+if "log" not in st.session_state:
+    st.session_state.log = emptyLog()
+
 st.subheader(f"Day {st.session_state.day}")
 
-# ---------- PHASE 1: LIVE CHECKS (not saved, only instant tips) ----------
+# ---------- PHASE 1: LIVE CHECKS ----------
 if st.session_state.phase == "live":
     st.write("Pick a check:")
 
@@ -92,6 +110,8 @@ if st.session_state.phase == "live":
         "heart": "Heart Beat",
         "dizzy": "Dizziness",
         "comfort": "Habitat Comfort",
+        "burnt": "Calories Burnt",
+        "consumed": "Calories Consumed",
     }
 
     # one button per check, the open one disappears
@@ -125,6 +145,30 @@ if st.session_state.phase == "live":
         else:
             st.success("Habitat conditions are fine")
 
+    elif tool == "burnt":
+        exercised = st.radio("Did you exercise today?", ["No", "Yes"], horizontal=True)
+
+        # if "No", nothing else happens
+        if exercised == "Yes":
+            muscles = st.multiselect("Which muscle groups did you work?", muscleOptions)
+            burnt = st.number_input("Calories burnt", 0, 5000, 200)
+
+            if st.button("Log exercise"):
+                if not muscles:
+                    st.warning("Pick at least one muscle group")
+                else:
+                    st.session_state.log["Exercised"] = True
+                    st.session_state.log["Muscle Groups"] = ", ".join(muscles)
+                    st.session_state.log["Calories Burnt"] = burnt
+                    st.success("Exercise logged! It will be saved when you save the day.")
+
+    elif tool == "consumed":
+        consumed = st.number_input("Calories consumed", 0, 10000, 2000)
+
+        if st.button("Log calories consumed"):
+            st.session_state.log["Calories Consumed"] = consumed
+            st.success("Calories logged! They will be saved when you save the day.")
+
     st.divider()
     if st.button("End Day"):
         st.session_state.tool = None
@@ -152,6 +196,7 @@ elif st.session_state.phase == "daily":
             "Exercise (min)": exercise,
             "Bedtime": bedtime.strftime("%H:%M"),
             "Remaining Limit (mSv)": remainingRadiationLimit,
+            **st.session_state.log,  # Exercised, Muscle Groups, Calories Burnt, Calories Consumed
         })
         st.session_state.phase = "saved"
         st.rerun()
@@ -162,6 +207,7 @@ else:
     if st.button("Next Day"):
         st.session_state.day += 1
         st.session_state.phase = "live"
+        st.session_state.log = emptyLog()  # new day starts fresh
         st.rerun()
 
 # ---------- SAVED FILES ----------
