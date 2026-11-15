@@ -1,4 +1,9 @@
+import io
+import math
 import os
+import struct
+import wave
+
 import streamlit as st
 import pandas as pd
 
@@ -20,6 +25,95 @@ distance = {
 calorieTolerance = 100
 
 
+# ---------- SOUND ----------
+RATE = 22050  # samples per second
+
+
+# a single beep: frequency (Hz), length (sec), volume (0-1), "sine" is soft, "square" is harsh
+def tone(freq, seconds, volume=0.4, shape="sine"):
+    n = int(RATE * seconds)
+    samples = []
+    for i in range(n):
+        value = math.sin(2 * math.pi * freq * i / RATE)
+        if shape == "square":
+            value = 1 if value >= 0 else -1
+        fade = 1 - i / n  # fades out so there is no "pop" at the end
+        samples.append(volume * fade * value)
+    return samples
+
+
+def silence(seconds):
+    return [0] * int(RATE * seconds)
+
+
+# turns a list of numbers into a wav file (bytes) that st.audio can play
+def toWav(samples):
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(RATE)
+        data = b"".join(
+            struct.pack("<h", int(max(-1, min(1, s)) * 32767)) for s in samples
+        )
+        w.writeframes(data)
+    return buffer.getvalue()
+
+
+# the sound effects. cache_data = built once, not on every run
+@st.cache_data
+def makeSound(name, variant):
+    if name == "click":
+        s = tone(800, 0.06, 0.3)
+    elif name == "save":
+        s = tone(523, 0.12) + tone(659, 0.12) + tone(784, 0.25)
+    elif name == "warning":
+        s = tone(440, 0.15) + silence(0.08) + tone(440, 0.15)
+    else:  # critical: alarm
+        s = (tone(900, 0.2, 0.5, "square") + tone(600, 0.2, 0.5, "square")) * 3
+    # variant makes the file a tiny bit different, so the browser plays
+    # the same sound again when it comes twice in a row
+    return toWav(s + silence(0.001 * variant))
+
+
+# background music: a soft looping chord (8 sec, loops without a gap)
+@st.cache_data
+def makeMusic():
+    samples = []
+    for i in range(RATE * 8):
+        t = i / RATE
+        chord = sum(math.sin(2 * math.pi * f * t) for f in (110, 165, 220, 330)) / 4
+        chord *= 0.6 + 0.4 * math.sin(2 * math.pi * 0.25 * t)  # slow volume wave
+        samples.append(0.25 * chord)
+    return toWav(samples)
+
+
+# if two sounds are queued in the same run, the more important one plays
+priority = {"click": 1, "save": 2, "warning": 3, "critical": 4}
+
+
+def queueSound(name):
+    if name == "warning":  # normal warnings are silent
+        return
+    current = st.session_state.get("sound")
+    if current is None or priority[name] >= priority[current]:
+        st.session_state.sound = name
+
+
+# plays the queued sound (if any), then clears it
+def playQueuedSound():
+    if "sound" in st.session_state:
+        name = st.session_state.sound
+        del st.session_state.sound
+        if soundOn:
+            st.session_state.soundCount = st.session_state.get("soundCount", 0) + 1
+            st.audio(
+                makeSound(name, st.session_state.soundCount % 2),
+                format="audio/wav",
+                autoplay=True,
+            )
+
+
 # adds one row to the end of a csv file (creates the file if it doesn't exist)
 def appendRow(path, row):
     new = pd.DataFrame([row])
@@ -34,6 +128,23 @@ if "message" in st.session_state:
     del st.session_state.message
 
 st.title("Astronaut Health Monitor")
+
+# sound switch and background music live in the sidebar
+soundOn = st.sidebar.toggle("Sound", value=True)
+if soundOn:
+    st.sidebar.write("Background music")
+    st.sidebar.audio(makeMusic(), format="audio/wav", loop=True, autoplay=True)
+
+# hides the sound effect players, only the sidebar one stays visible
+st.markdown(
+    """
+    <style>
+    audio { display: none; }
+    [data-testid="stSidebar"] audio { display: block; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # load mission from file if it exists
 if "mission" not in st.session_state and os.path.exists(missionFile):
@@ -52,8 +163,10 @@ if "mission" not in st.session_state:
 
     if isCritical:
         st.error("CRITICAL: RADIATION LIMIT REACHED, YOU CAN'T PARTICIPATE IN THIS MISSION")
+        queueSound("critical")
     elif isRisky:
         st.warning("Radiation limit is high, are you certain you want to participate in this mission?")
+        queueSound("warning")
 
     # disabled=True makes the button unclickable when critical
     if st.button("Save Mission", disabled=isCritical):
@@ -65,8 +178,10 @@ if "mission" not in st.session_state:
         pd.DataFrame([mission]).to_csv(missionFile, index=False)
         st.session_state.mission = mission
         st.session_state.message = "Mission saved!"
+        queueSound("save")
         st.rerun()
 
+    playQueuedSound()
     st.stop()  # nothing below runs until the mission is saved
 
 # ---------- RADIATION ----------
@@ -120,6 +235,7 @@ if st.session_state.phase == "live":
         if key != st.session_state.tool:
             if col.button(label):
                 st.session_state.tool = key  # opens this check, closes the other one
+                queueSound("click")
                 st.rerun()
 
     tool = st.session_state.tool
@@ -128,6 +244,7 @@ if st.session_state.phase == "live":
         heartBeat = st.number_input("What is your Heart Beat?", 30, 200, 70)
         if heartBeat < 40 or heartBeat > 150:
             st.error("CRITICAL: DEADLY HEART BEAT, SEEK HELP IMMEDIATLY")
+            queueSound("critical")
         else:
             st.success("Heart beat is normal")
 
@@ -135,6 +252,7 @@ if st.session_state.phase == "live":
         dizzy = st.checkbox("Feeling dizzy or lightheaded?")  # gravity changes
         if dizzy:
             st.warning("Sit or lie down, rest and drink water")
+            queueSound("warning")
         else:
             st.success("No problem")
 
@@ -142,6 +260,7 @@ if st.session_state.phase == "live":
         comfort = st.slider("Habitat comfort (1-10)", 1, 10, 5)  # temperature, noise, light, crowding
         if comfort < 4:
             st.warning("Habitat conditions are poor: check temperature, noise and lighting")
+            queueSound("warning")
         else:
             st.success("Habitat conditions are fine")
 
@@ -163,25 +282,30 @@ if st.session_state.phase == "live":
                 st.success("Good, you are in a calorie surplus")
             else:
                 st.warning("Eat more or exercise less")
+                queueSound("warning")
 
         elif goal == "Lose weight":  # deficit: consumed < burnt
             if consumed < burnt:
                 st.success("Good, you are in a calorie deficit")
             else:
                 st.warning("Eat less or exercise more")
+                queueSound("warning")
 
         else:  # maintain: consumed is about equal to burnt
             if abs(diff) <= calorieTolerance:
                 st.success("Good, your calories are balanced")
             elif diff > 0:
                 st.warning("You ate more than you burnt: eat less or exercise more")
+                queueSound("warning")
             else:
                 st.warning("You burnt more than you ate: eat more or exercise less")
+                queueSound("warning")
 
     st.divider()
     if st.button("End Day"):
         st.session_state.tool = None
         st.session_state.phase = "daily"
+        queueSound("click")
         st.rerun()
 
 # ---------- PHASE 2: DAILY RECORD ----------
@@ -189,11 +313,11 @@ elif st.session_state.phase == "daily":
     st.write("Fill in your daily record.")
 
     sleep = st.number_input("How many hours did you sleep", 0, 24, 7)
+    talk = st.checkbox("Did you talk to someone today?")  # isolation
     mood = st.slider("Mood (1-10)", 1, 10, 5)
     workload = st.slider("Workload today (1-10)", 1, 10, 5)
     exercise = st.number_input("Exercise today (minutes)", 0, 300, 30)  # bone loss prevention
     bedtime = st.time_input("Bedtime")
-    talk = st.checkbox("Did you talk to someone today?")  # isolation
 
     if st.button("Save"):
         appendRow(file, {
@@ -207,6 +331,7 @@ elif st.session_state.phase == "daily":
             "Remaining Limit (mSv)": remainingRadiationLimit,
         })
         st.session_state.phase = "saved"
+        queueSound("save")
         st.rerun()
 
 # ---------- PHASE 3: DAY SAVED ----------
@@ -215,6 +340,7 @@ else:
     if st.button("Next Day"):
         st.session_state.day += 1
         st.session_state.phase = "live"
+        queueSound("click")
         st.rerun()
 
 # ---------- SAVED FILES ----------
@@ -224,6 +350,7 @@ if "fileShow" not in st.session_state:
 if os.path.exists(file):
     if st.button("Saved Files"):
         st.session_state.fileShow = not st.session_state.fileShow
+        queueSound("click")
 
     if st.session_state.fileShow:
         st.dataframe(pd.read_csv(file))
@@ -233,8 +360,10 @@ if "tipsShow" not in st.session_state:
     st.session_state.tipsShow = False
 
 if os.path.exists(file):
-    if st.button("Tips"):
+    tipsClicked = st.button("Tips")  # True only in the run where it was just clicked
+    if tipsClicked:
         st.session_state.tipsShow = not st.session_state.tipsShow
+        queueSound("click")
 
     if st.session_state.tipsShow:
         data = pd.read_csv(file)
@@ -269,3 +398,13 @@ if os.path.exists(file):
                 st.warning(tip)
         elif not critical:
             st.success("Everything looks good!")
+
+        # sound only when Tips was just opened, so it doesn't repeat on every click
+        if tipsClicked:
+            if critical:
+                queueSound("critical")
+            elif tips:
+                queueSound("warning")
+
+# plays the sound that was queued during this run (keep this at the very end)
+playQueuedSound()
