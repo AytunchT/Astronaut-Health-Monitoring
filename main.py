@@ -2,7 +2,7 @@ import os
 import streamlit as st
 import pandas as pd
 
-file = "File.csv"            # daily records
+file = "File.csv"            # daily records (one row per day)
 missionFile = "Mission.csv"  # mission info (so F5 doesn't lose it)
 
 radiation = {
@@ -10,10 +10,17 @@ radiation = {
     "Mars": 0.67,
 }
 
+# adds one row to the end of a csv file (creates the file if it doesn't exist)
+def appendRow(path, row):
+    new = pd.DataFrame([row])
+    if os.path.exists(path):
+        new = pd.concat([pd.read_csv(path), new], ignore_index=True)
+    new.to_csv(path, index=False)
+
 # one-time message after rerun
-if "missionMessage" in st.session_state:
-    st.success(st.session_state.missionMessage)
-    del st.session_state.missionMessage
+if "message" in st.session_state:
+    st.success(st.session_state.message)
+    del st.session_state.message
 
 st.title("Astronaut Health Monitor")
 
@@ -32,7 +39,6 @@ if "mission" not in st.session_state:
     isCritical = previewDose > radiationLimit
     isRisky = previewDose > radiationLimit * 0.5 and not isCritical
 
-    # warnings appear right under the radiation limit input
     if isCritical:
         st.error("CRITICAL: RADIATION LIMIT REACHED, YOU CAN'T PARTICIPATE IN THIS MISSION")
     elif isRisky:
@@ -47,21 +53,20 @@ if "mission" not in st.session_state:
         }
         pd.DataFrame([mission]).to_csv(missionFile, index=False)
         st.session_state.mission = mission
-        st.session_state.missionMessage = "Mission saved!"
+        st.session_state.message = "Mission saved!"
         st.rerun()
 
-    st.stop()  # stops here, nothing below runs until the mission is saved
+    st.stop()  # nothing below runs until the mission is saved
 
 # ---------- RADIATION ----------
 m = st.session_state.mission
 dose = radiation[m["Location"]] * m["Days"]
 remainingRadiationLimit = m["Radiation Limit"] - dose
 
-# risky missions can still be saved, so keep reminding after setup
 if dose > m["Radiation Limit"] * 0.5:
     st.warning("Radiation limit is high")
 
-# ---------- DAILY INPUT ----------
+# ---------- DAY / PHASE ----------
 # day number continues from the last day in the file
 if "day" not in st.session_state:
     if os.path.exists(file):
@@ -69,42 +74,94 @@ if "day" not in st.session_state:
     else:
         st.session_state.day = 1
 
-if "saved" not in st.session_state:
-    st.session_state.saved = False  # False = today's inputs are open
+# phase: "live" = live checks, "daily" = end of day form, "saved" = day saved
+if "phase" not in st.session_state:
+    st.session_state.phase = "live"
+
+# which live check is open (None = all closed)
+if "tool" not in st.session_state:
+    st.session_state.tool = None
 
 st.subheader(f"Day {st.session_state.day}")
 
-if not st.session_state.saved:
+# ---------- PHASE 1: LIVE CHECKS (not saved, only instant tips) ----------
+if st.session_state.phase == "live":
+    st.write("Pick a check:")
+
+    tools = {
+        "heart": "Heart Beat",
+        "dizzy": "Dizziness",
+        "comfort": "Habitat Comfort",
+    }
+
+    # one button per check, the open one disappears
+    cols = st.columns(len(tools))
+    for col, (key, label) in zip(cols, tools.items()):
+        if key != st.session_state.tool:
+            if col.button(label):
+                st.session_state.tool = key  # opens this check, closes the other one
+                st.rerun()
+
+    tool = st.session_state.tool
+
+    if tool == "heart":
+        heartBeat = st.number_input("What is your Heart Beat?", 30, 200, 70)
+        if heartBeat < 40 or heartBeat > 150:
+            st.error("CRITICAL: DEADLY HEART BEAT, SEEK HELP IMMEDIATLY")
+        else:
+            st.success("Heart beat is normal")
+
+    elif tool == "dizzy":
+        dizzy = st.checkbox("Feeling dizzy or lightheaded?")  # gravity changes
+        if dizzy:
+            st.warning("Sit or lie down, rest and drink water")
+        else:
+            st.success("No problem")
+
+    elif tool == "comfort":
+        comfort = st.slider("Habitat comfort (1-10)", 1, 10, 5)  # temperature, noise, light, crowding
+        if comfort < 4:
+            st.warning("Habitat conditions are poor: check temperature, noise and lighting")
+        else:
+            st.success("Habitat conditions are fine")
+
+    st.divider()
+    if st.button("End Day"):
+        st.session_state.tool = None
+        st.session_state.phase = "daily"
+        st.rerun()
+
+# ---------- PHASE 2: DAILY RECORD ----------
+elif st.session_state.phase == "daily":
+    st.write("Fill in your daily record.")
+
     sleep = st.number_input("How many hours did you sleep", 0, 24, 7)
+    talk = st.checkbox("Did you talk to someone today?")  # isolation
     mood = st.slider("Mood (1-10)", 1, 10, 5)
     workload = st.slider("Workload today (1-10)", 1, 10, 5)
+    exercise = st.number_input("Exercise today (minutes)", 0, 300, 30)  # bone loss prevention
     bedtime = st.time_input("Bedtime")
-    talk = st.checkbox("Did you talk to someone today?")
 
     if st.button("Save"):
-        new = pd.DataFrame([{
+        appendRow(file, {
             "Day": st.session_state.day,
             "Sleep (hr)": sleep,
             "Talked": talk,
             "Mood": mood,
             "Workload": workload,
+            "Exercise (min)": exercise,
             "Bedtime": bedtime.strftime("%H:%M"),
             "Remaining Limit (mSv)": remainingRadiationLimit,
-        }])
-
-        if os.path.exists(file):
-            table = pd.concat([pd.read_csv(file), new], ignore_index=True)
-        else:
-            table = new
-
-        table.to_csv(file, index=False)
-        st.session_state.saved = True
+        })
+        st.session_state.phase = "saved"
         st.rerun()
+
+# ---------- PHASE 3: DAY SAVED ----------
 else:
     st.success(f"Day {st.session_state.day} saved!")
     if st.button("Next Day"):
         st.session_state.day += 1
-        st.session_state.saved = False
+        st.session_state.phase = "live"
         st.rerun()
 
 # ---------- SAVED FILES ----------
@@ -118,28 +175,41 @@ if os.path.exists(file):
     if st.session_state.fileShow:
         st.dataframe(pd.read_csv(file))
 
-# ---------- TIPS ----------
+# ---------- TIPS (based on daily records) ----------
 if "tipsShow" not in st.session_state:
     st.session_state.tipsShow = False
 
 if os.path.exists(file):
-    data = pd.read_csv(file)
-
     if st.button("Tips"):
         st.session_state.tipsShow = not st.session_state.tipsShow
 
     if st.session_state.tipsShow:
+        data = pd.read_csv(file)
+        last = data.iloc[-1]    # most recent day
+        recent = data.tail(3)   # last 3 days (or fewer if there are fewer days)
         tips = []
         critical = False
 
-        if data["Sleep (hr)"].mean() < 8:
-            tips.append("Sleep More")
-        if data["Mood"].mean() < 5:
-            tips.append("Try to relax and talk to someone")
-
-        if data["Sleep (hr)"].mean() <= 3:
+        # critical: looks at the last day
+        if last["Sleep (hr)"] <= 3:
             st.error("CRITICAL: DEADLY SLEEPING SCHEDULE, SLEEP MORE")
             critical = True
+        # trend: looks at the last 3 days
+        elif recent["Sleep (hr)"].mean() < 8:
+            tips.append("Sleep More")
+
+        if recent["Mood"].mean() < 5:
+            tips.append("Try to relax and talk to someone")
+        if recent["Exercise (min)"].mean() < 30:
+            tips.append("Exercise more: bones lose density without gravity")
+
+        # combined: last day
+        if last["Workload"] >= 8 and last["Sleep (hr)"] < 6:
+            tips.append("High workload and low sleep together: take a break")
+
+        # isolation: last 3 days
+        if len(data) >= 3 and recent["Talked"].sum() == 0:
+            tips.append("You haven't talked to anyone for 3 days: contact someone")
 
         if tips and not critical:
             for tip in tips:
