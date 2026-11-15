@@ -10,17 +10,14 @@ radiation = {
     "Mars": 0.67,
 }
 
-muscleOptions = ["Biceps", "Triceps", "Back", "Chest", "Legs", "Shoulders"]
+# average distance from Earth in km (Mars changes a lot, this is the average)
+distance = {
+    "Moon": 384_400,
+    "Mars": 225_000_000,
+}
 
-
-# a fresh log for a new day
-def emptyLog():
-    return {
-        "Exercised": False,
-        "Muscle Groups": "",
-        "Calories Burnt": 0,
-        "Calories Consumed": 0,
-    }
+# "maintain weight" counts as OK if consumed and burnt are this close (kcal)
+calorieTolerance = 100
 
 
 # adds one row to the end of a csv file (creates the file if it doesn't exist)
@@ -96,13 +93,17 @@ if "phase" not in st.session_state:
 if "tool" not in st.session_state:
     st.session_state.tool = None
 
-# exercise / calories collected during the day, saved with the daily record
-if "log" not in st.session_state:
-    st.session_state.log = emptyLog()
+# ---------- MISSION INFO (click the title to open/close) ----------
+with st.expander("Mission info"):
+    remaining = max(m["Days"] - st.session_state.day, 0)  # mission days - current day
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Mission", m["Location"])
+    c2.metric("Remaining time", f"{remaining} days")
+    c3.metric("Distance from Earth", f"{distance[m['Location']]:,} km")
 
 st.subheader(f"Day {st.session_state.day}")
 
-# ---------- PHASE 1: LIVE CHECKS ----------
+# ---------- PHASE 1: LIVE CHECKS (not saved, only instant tips) ----------
 if st.session_state.phase == "live":
     st.write("Pick a check:")
 
@@ -110,8 +111,7 @@ if st.session_state.phase == "live":
         "heart": "Heart Beat",
         "dizzy": "Dizziness",
         "comfort": "Habitat Comfort",
-        "burnt": "Calories Burnt",
-        "consumed": "Calories Consumed",
+        "calories": "Calories",
     }
 
     # one button per check, the open one disappears
@@ -145,29 +145,38 @@ if st.session_state.phase == "live":
         else:
             st.success("Habitat conditions are fine")
 
-    elif tool == "burnt":
-        exercised = st.radio("Did you exercise today?", ["No", "Yes"], horizontal=True)
-
-        # if "No", nothing else happens
-        if exercised == "Yes":
-            muscles = st.multiselect("Which muscle groups did you work?", muscleOptions)
-            burnt = st.number_input("Calories burnt", 0, 5000, 200)
-
-            if st.button("Log exercise"):
-                if not muscles:
-                    st.warning("Pick at least one muscle group")
-                else:
-                    st.session_state.log["Exercised"] = True
-                    st.session_state.log["Muscle Groups"] = ", ".join(muscles)
-                    st.session_state.log["Calories Burnt"] = burnt
-                    st.success("Exercise logged! It will be saved when you save the day.")
-
-    elif tool == "consumed":
+    elif tool == "calories":
+        goal = st.radio(
+            "What is your goal?",
+            ["Gain weight", "Lose weight", "Maintain weight"],
+            horizontal=True,
+        )
         consumed = st.number_input("Calories consumed", 0, 10000, 2000)
+        burnt = st.number_input("Calories burnt", 0, 10000, 2000)
+        diff = consumed - burnt  # positive = ate more than burnt
 
-        if st.button("Log calories consumed"):
-            st.session_state.log["Calories Consumed"] = consumed
-            st.success("Calories logged! They will be saved when you save the day.")
+        st.write(f"Difference: {diff:+} kcal")
+
+        # instant tips, nothing is saved
+        if goal == "Gain weight":  # bulk: consumed > burnt
+            if consumed > burnt:
+                st.success("Good, you are in a calorie surplus")
+            else:
+                st.warning("Eat more or exercise less")
+
+        elif goal == "Lose weight":  # deficit: consumed < burnt
+            if consumed < burnt:
+                st.success("Good, you are in a calorie deficit")
+            else:
+                st.warning("Eat less or exercise more")
+
+        else:  # maintain: consumed is about equal to burnt
+            if abs(diff) <= calorieTolerance:
+                st.success("Good, your calories are balanced")
+            elif diff > 0:
+                st.warning("You ate more than you burnt: eat less or exercise more")
+            else:
+                st.warning("You burnt more than you ate: eat more or exercise less")
 
     st.divider()
     if st.button("End Day"):
@@ -180,11 +189,11 @@ elif st.session_state.phase == "daily":
     st.write("Fill in your daily record.")
 
     sleep = st.number_input("How many hours did you sleep", 0, 24, 7)
-    talk = st.checkbox("Did you talk to someone today?")  # isolation
     mood = st.slider("Mood (1-10)", 1, 10, 5)
     workload = st.slider("Workload today (1-10)", 1, 10, 5)
     exercise = st.number_input("Exercise today (minutes)", 0, 300, 30)  # bone loss prevention
     bedtime = st.time_input("Bedtime")
+    talk = st.checkbox("Did you talk to someone today?")  # isolation
 
     if st.button("Save"):
         appendRow(file, {
@@ -196,7 +205,6 @@ elif st.session_state.phase == "daily":
             "Exercise (min)": exercise,
             "Bedtime": bedtime.strftime("%H:%M"),
             "Remaining Limit (mSv)": remainingRadiationLimit,
-            **st.session_state.log,  # Exercised, Muscle Groups, Calories Burnt, Calories Consumed
         })
         st.session_state.phase = "saved"
         st.rerun()
@@ -207,7 +215,6 @@ else:
     if st.button("Next Day"):
         st.session_state.day += 1
         st.session_state.phase = "live"
-        st.session_state.log = emptyLog()  # new day starts fresh
         st.rerun()
 
 # ---------- SAVED FILES ----------
