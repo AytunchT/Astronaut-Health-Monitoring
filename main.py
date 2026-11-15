@@ -7,6 +7,8 @@ import wave
 import streamlit as st
 import pandas as pd
 
+st.set_page_config(initial_sidebar_state="collapsed")
+
 file = "File.csv"            # daily records (one row per day)
 missionFile = "Mission.csv"  # mission info (so F5 doesn't lose it)
 
@@ -78,13 +80,13 @@ def makeSound(name, variant):
 
 # background music: a soft looping chord (8 sec, loops without a gap)
 @st.cache_data
-def makeMusic():
+def makeMusic(variant):
     samples = []
     for i in range(RATE * 8):
         t = i / RATE
         chord = sum(math.sin(2 * math.pi * f * t) for f in (110, 165, 220, 330)) / 4
         chord *= 0.6 + 0.4 * math.sin(2 * math.pi * 0.25 * t)  # slow volume wave
-        samples.append(0.25 * chord)
+        samples.append((0.25 - 0.001 * variant) * chord)  # variant: tiny change, different file
     return toWav(samples)
 
 
@@ -130,10 +132,18 @@ if "message" in st.session_state:
 st.title("Astronaut Health Monitor")
 
 # sound switch and background music live in the sidebar
+# counts the runs: the first run is the page load, the next ones come from clicks
+st.session_state.runs = st.session_state.get("runs", 0) + 1
+
 soundOn = st.sidebar.toggle("Sound", value=True)
 if soundOn:
     st.sidebar.write("Background music")
-    st.sidebar.audio(makeMusic(), format="audio/wav", loop=True, autoplay=True)
+    st.sidebar.audio(
+        makeMusic(0 if st.session_state.runs == 1 else 1),
+        format="audio/wav",
+        loop=True,
+        autoplay=True,
+    )
 
 # hides the sound effect players, only the sidebar one stays visible
 st.markdown(
