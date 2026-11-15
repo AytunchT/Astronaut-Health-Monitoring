@@ -197,9 +197,6 @@ m = st.session_state.mission
 dose = radiation[m["Location"]] * m["Days"]
 remainingRadiationLimit = m["Radiation Limit"] - dose
 
-if dose > m["Radiation Limit"] * 0.5:
-    st.warning("Radiation limit is high")
-
 # ---------- DAY / PHASE ----------
 # day number continues from the last day in the file
 if "day" not in st.session_state:
@@ -208,13 +205,51 @@ if "day" not in st.session_state:
     else:
         st.session_state.day = 1
 
-# phase: "live" = live checks, "daily" = end of day form, "saved" = day saved
+# phase: "live" = live checks, "daily" = end of day form, "saved" = day saved,
+# "completed" = last day of the mission is saved
 if "phase" not in st.session_state:
     st.session_state.phase = "live"
 
 # which live check is open (None = all closed)
 if "tool" not in st.session_state:
     st.session_state.tool = None
+
+# ---------- MISSION COMPLETED ----------
+# also covers F5: if all days are already in the file, the mission is over
+if st.session_state.day > m["Days"]:
+    st.session_state.phase = "completed"
+
+if st.session_state.phase == "completed":
+    st.success("MISSION COMPLETED")
+
+    if "missionFilesShow" not in st.session_state:
+        st.session_state.missionFilesShow = False
+
+    # shows the records of this mission (reads File.csv)
+    if st.button("Mission Files"):
+        st.session_state.missionFilesShow = not st.session_state.missionFilesShow
+        queueSound("click")
+
+    if st.session_state.missionFilesShow and os.path.exists(file):
+        st.dataframe(pd.read_csv(file))
+
+    if st.button("Next Mission"):
+        # deletes the old mission and its records, so the next mission starts from Day 1
+        if os.path.exists(file):
+            os.remove(file)
+        if os.path.exists(missionFile):
+            os.remove(missionFile)
+        for key in ["mission", "day", "phase", "tool", "fileShow", "tipsShow", "missionFilesShow"]:
+            st.session_state.pop(key, None)
+        queueSound("click")
+        st.rerun()
+
+    playQueuedSound()
+    st.stop()  # nothing below runs, only the completed screen is shown
+
+# radiation reminder (only while the mission is still going)
+if dose > m["Radiation Limit"] * 0.5:
+    st.warning("Radiation limit is high")
 
 # ---------- MISSION INFO (click the title to open/close) ----------
 with st.expander("Mission info"):
@@ -313,7 +348,7 @@ if st.session_state.phase == "live":
     if st.button("End Day"):
         st.session_state.tool = None
         st.session_state.phase = "daily"
-        queueSound("click")
+        st.session_state.sound = "click"  # overrides a queued alarm
         st.rerun()
 
 # ---------- PHASE 2: DAILY RECORD ----------
@@ -338,7 +373,11 @@ elif st.session_state.phase == "daily":
             "Bedtime": bedtime.strftime("%H:%M"),
             "Remaining Limit (mSv)": remainingRadiationLimit,
         })
-        st.session_state.phase = "saved"
+        # last day of the mission -> completed, otherwise the normal saved screen
+        if st.session_state.day >= m["Days"]:
+            st.session_state.phase = "completed"
+        else:
+            st.session_state.phase = "saved"
         queueSound("save")
         st.rerun()
 
@@ -358,7 +397,7 @@ if "fileShow" not in st.session_state:
 if os.path.exists(file):
     if st.button("Saved Files"):
         st.session_state.fileShow = not st.session_state.fileShow
-        queueSound("click")
+        st.session_state.sound = "click"  # overrides a queued alarm
 
     if st.session_state.fileShow:
         st.dataframe(pd.read_csv(file))
@@ -371,7 +410,7 @@ if os.path.exists(file):
     tipsClicked = st.button("Tips")  # True only in the run where it was just clicked
     if tipsClicked:
         st.session_state.tipsShow = not st.session_state.tipsShow
-        queueSound("click")
+        st.session_state.sound = "click"  # overrides a queued alarm
 
     if st.session_state.tipsShow:
         data = pd.read_csv(file)
