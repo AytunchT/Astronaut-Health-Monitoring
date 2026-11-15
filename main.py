@@ -27,7 +27,19 @@ if "mission" not in st.session_state:
     missionDays = st.number_input("Mission length (days)", 1, 1000, 30)
     radiationLimit = st.number_input("Radiation Limit (mSv)", 0, 600, 600)
 
-    if st.button("Save Mission"):
+    # calculate the dose live, before the button
+    previewDose = radiation[missionLocation] * missionDays
+    isCritical = previewDose > radiationLimit
+    isRisky = previewDose > radiationLimit * 0.5 and not isCritical
+
+    # warnings appear right under the radiation limit input
+    if isCritical:
+        st.error("CRITICAL: RADIATION LIMIT REACHED, YOU CAN'T PARTICIPATE IN THIS MISSION")
+    elif isRisky:
+        st.warning("Radiation limit is high, are you certain you want to participate in this mission?")
+
+    # disabled=True makes the button unclickable when critical
+    if st.button("Save Mission", disabled=isCritical):
         mission = {
             "Location": missionLocation,
             "Days": missionDays,
@@ -45,10 +57,9 @@ m = st.session_state.mission
 dose = radiation[m["Location"]] * m["Days"]
 remainingRadiationLimit = m["Radiation Limit"] - dose
 
-if dose > m["Radiation Limit"]:
-    st.error("CRITICAL: RADIATION LIMIT REACHED, YOU CAN'T PARTICIPATE IN THIS MISSION")
-elif dose > m["Radiation Limit"] * 0.5:
-    st.warning("Radiation limit is high, are you certain you want to participate in this mission?")
+# risky missions can still be saved, so keep reminding after setup
+if dose > m["Radiation Limit"] * 0.5:
+    st.warning("Radiation limit is high")
 
 # ---------- DAILY INPUT ----------
 # day number continues from the last day in the file
