@@ -107,13 +107,12 @@ def playQueuedSound():
     if "sound" in st.session_state:
         name = st.session_state.sound
         del st.session_state.sound
-        if soundOn:
-            st.session_state.soundCount = st.session_state.get("soundCount", 0) + 1
-            st.audio(
-                makeSound(name, st.session_state.soundCount % 2),
-                format="audio/wav",
-                autoplay=True,
-            )
+        st.session_state.soundCount = st.session_state.get("soundCount", 0) + 1
+        st.audio(
+            makeSound(name, st.session_state.soundCount % 2),
+            format="audio/wav",
+            autoplay=True,
+        )
 
 
 # adds one row to the end of a csv file (creates the file if it doesn't exist)
@@ -135,9 +134,8 @@ st.title("Astronaut Health Monitor")
 # counts the runs: the first run is the page load, the next ones come from clicks
 st.session_state.runs = st.session_state.get("runs", 0) + 1
 
-soundOn = st.sidebar.toggle("Sound", value=True)
-if soundOn:
-    st.sidebar.write("Background music")
+musicOn = st.sidebar.toggle("Background music", value=True)
+if musicOn:
     st.sidebar.audio(
         makeMusic(0 if st.session_state.runs == 1 else 1),
         format="audio/wav",
